@@ -1,13 +1,19 @@
 <?php
+/**
+ * Created by PhpStorm.
+ * User: kruchinin
+ * Date: 18.07.18
+ * Time: 12:19
+ */
 
-/* 
+/*
  * To change this license header, choose License Headers in Project Properties.
  * To change this template file, choose Tools | Templates
  * and open the template in the editor.
  */
 class post
 {
-	
+
 }
 error_reporting(E_ALL);
 echo 'Test';
@@ -18,7 +24,6 @@ $result = $stmt->fetchAll(PDO::FETCH_CLASS,'post');
 var_dump($result);
 ?>
 <style>
-
 tr:nth-child(odd){background-color:lightgray;}
 tr:nth-child(even){background-color:gray;}
 .selected{background-color:yellow !important;}
@@ -40,21 +45,33 @@ tr:nth-child(even){background-color:gray;}
 		{
 			event = e || window.event;
 			var tar = event.target || event.srcElement;
-			var row = tar.closest('[data-rowid]');//'.row'
-			var butt = tar.getAttribute('data-buttontype');
-			switch (butt)
-			{
-				case 'delete' :
-				console.log(butt + ' rowid: '+row.getAttribute('data-rowid'));
-				break;
-				case 'edit' :
-				console.log(butt + ' rowid: '+row.getAttribute('data-rowid'));
-				break;
-				default :
-				row.classList.toggle('selected');
-				document.location.replace('#row id is: ' + row.getAttribute('data-rowid'));
+			if (!(tar.tagName.toLowerCase() === 'tbody' || tar.tagName.toLowerCase() === 'table')) {
+
+
+				var row = tar.closest('[data-rowid]');//'.row'
+				var butt = tar.getAttribute('data-buttontype');
+				switch (butt) {
+					case 'delete' :
+						console.log(butt + ' rowid: ' + row.getAttribute('data-rowid'));
+						break;
+					case 'edit' :
+						if (!row) {
+							console.log(butt);
+						}
+						console.log(butt + ' rowid: ' + row.getAttribute('data-rowid'));
+						break;
+					default :
+						if (!row) {
+							console.log(butt);
+						}
+						row.classList.toggle('selected');
+						document.location.replace('#row id is: ' + row.getAttribute('data-rowid'));
+				}
 			}
-			
+			else
+			{
+				console.log('нажали на: '+tar.tagName);
+			}
 			/*var quer = row.classList.contains('row');
 			while (!quer)
 			{
@@ -62,8 +79,8 @@ tr:nth-child(even){background-color:gray;}
 				quer = row.classList.contains('row');
 			}
 			*/
-			
-			
+
+
 			//if (tar)
 			//document.location.reload();
 		}
