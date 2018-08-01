@@ -9,7 +9,7 @@
 // https://webglfundamentals.org/webgl/webgl-2d-rectangles.html
 //https://webglfundamentals.org/webgl/lessons/ru/webgl-fundamentals.html
 //https://habr.com/post/227201/  свой движек вебгл
-?>
+/*
 2д
 
 <?php
@@ -1469,3 +1469,5 @@ for webgl-utils, m3, m4, and webgl-lessons-ui.
 
 
 </body>
+*/
+?>
