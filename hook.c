@@ -62,3 +62,4 @@ int main()
  
     XCloseDisplay(display);
 }
+// полезняшка https://evileg.com/ru/post/291/
