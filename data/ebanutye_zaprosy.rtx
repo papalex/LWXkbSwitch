@@ -1,0 +1,37 @@
+		delete from mts_out_1c where mts_period_id = :period and user_id = :uid and is_saved=0;
+with aggregate as (
+		select sum(ma.cost) as mtsamount,
+			mc.krp_company as krp_kompany,
+			mnmp.mts_period_id as mts_period_id,
+			mpa.number as account,
+			mc.number as contract,
+			mnmp.user_id,
+			cast(max(mtp.amount) as integer) as limit_amount,
+			max(ma.discount) as discount
+		from mts_aggregate ma
+			join mts_number_mts_period mnmp on mnmp.mts_number_mts_period_id = ma.mts_number_mts_period_id
+			join mts_number mn on mnmp.mts_number_id = mn.mts_number_id
+			join mts_tariff_plan mtp on mnmp.mts_tariff_plan = mtp.mts_tariff_plan
+			inner join mts_person_account mpa on mpa.mts_person_account_id = mn.mts_person_account_id 
+				and not exists(select 'x' from mts_number_mts_period mnmp2 
+					join mts_number mn2 on mnmp2.mts_number_id = mn2.mts_number_id
+					join mts_person_account mpa2 on mpa2.mts_contract_id = mpa.mts_contract_id 
+					where mnmp2.amount > 1 and mnmp2.user_id isnull and mnmp2.mts_period_id = :period)
+				and not exists(select 'x' from mts_out_1c mo1c where mpa.number = mo1c.account and mo1c.mts_period_id = :period and is_saved =1 )
+			inner join mts_contract mc on mpa.mts_contract_id = mc.mts_contract_id 
+		group by mc.krp_company,mnmp.mts_period_id, mpa.number, mc.number,mnmp.user_id, mnmp.mts_tariff_plan
+)
+insert into mts_out_1c (contract,account,invoice_date,
+						filename,employee_id,fms,period,
+						amount,limit_amount,discount,is_saved,user_id,mts_period_id)
+	select aggregate.contract,aggregate.account, cast(mpf.create_date as date) as invoice_date, 
+		replace(filelink.link,:basepath,'') as filename, u.employee_id, u.fms, mp.period, 
+		aggregate.mtsamount, aggregate.limit_amount,aggregate.discount,0,:uid as user_id,mp.mts_period_id from mts_period_files mpf
+	join files filelink on mpf.files_id = filelink.files_id
+	inner join mts_period mp on mp.mts_period_id = mpf.mts_period_id and (:period is null or mp.mts_period_id = :period)
+	inner join krp_company krpc on mpf.krp_company = krpc.krp_company 
+			and exists(select 'x' from groupe g
+							join user_groupe_cache ugc on ugc.groupe_id=g.groupe_id and ugc.user_id=:uid
+			where g.groupe_type='MTS' and g.code ='MTS_' || krpc.krp_company) 
+	join aggregate on aggregate.mts_period_id = mpf.mts_period_id and aggregate.krp_kompany = mpf.krp_company
+	join "user" u on aggregate.user_id = u.user_id
