@@ -1,0 +1,1118 @@
+----------------------------mts_service_agg_type------------------------
+CREATE TABLE mts_service_agg_type
+(
+  mts_service_agg_type character varying(64) NOT NULL,
+  name character varying(255), -- Название
+  CONSTRAINT mts_service_agg_type_pk PRIMARY KEY (mts_service_agg_type),
+  CONSTRAINT mts_service_agg_type_uni UNIQUE (name)
+)
+WITH (
+OIDS=FALSE
+);
+ALTER TABLE mts_service_agg_type
+  OWNER TO postgres;
+GRANT ALL ON TABLE mts_service_agg_type TO postgres;
+GRANT ALL ON TABLE mts_service_agg_type TO public;
+COMMENT ON TABLE mts_service_agg_type
+IS 'Тип аггрегированной услуги';
+COMMENT ON COLUMN mts_service_agg_type.name IS 'Название';
+CREATE INDEX mts_service_agg_type_name_idx ON public.mts_service_agg_type (name);
+insert into mts_service_agg_type (name,mts_service_agg_type) select name, service_agg_type from mobile_service_agg_type;
+
+--------------------------mts_tariff_plan--------------------------------
+CREATE TABLE public.mts_tariff_plan
+(
+  mts_tariff_plan character varying(64) PRIMARY KEY NOT NULL,
+  name character varying(255) NOT NULL,
+  description text,
+  amount numeric(12,4) NOT NULL,
+  is_visible smallint DEFAULT 0 NOT NULL,
+  user__id int,
+  CONSTRAINT "mts_tariff_plan > user" FOREIGN KEY (user__id) REFERENCES "user" (user_id) on update cascade,
+  CONSTRAINT mts_tariff_plan_is_visible_chk CHECK (is_visible = ANY (ARRAY[0, 1])),
+  CONSTRAINT mts_tariff_plan_amount_chk CHECK (amount >0)
+);
+ALTER TABLE "mts_tariff_plan"
+  OWNER TO postgres;
+GRANT ALL ON TABLE "mts_tariff_plan" TO postgres;
+GRANT ALL ON TABLE "mts_tariff_plan" TO public;
+
+CREATE INDEX mts_tariff_plan_name_idx ON public.mts_tariff_plan (name);
+CREATE INDEX mts_tariff_plan_amount_idx ON public.mts_tariff_plan (amount);
+CREATE INDEX mts_tariff_plan_user__id_idx ON public.mts_tariff_plan (user__id);
+CREATE INDEX mts_tariff_plan_is_visible_idx ON public.mts_tariff_plan (is_visible);
+COMMENT ON COLUMN public.mts_tariff_plan.mts_tariff_plan IS 'Тарифный план';
+COMMENT ON COLUMN public.mts_tariff_plan.name IS 'Название';
+COMMENT ON COLUMN public.mts_tariff_plan.description IS 'Описание';
+COMMENT ON COLUMN public.mts_tariff_plan.amount IS 'Стоимость';
+COMMENT ON COLUMN public.mts_tariff_plan.is_visible IS 'Видимость';
+COMMENT ON COLUMN public.mts_tariff_plan.user__id IS 'Автор';
+COMMENT ON TABLE public.mts_tariff_plan IS 'Тарифные планы сотового оператора';
+
+
+create table "mts_tariff_plan_R"
+(
+	revision_id bigserial    not null
+		constraint "mts_tariff_plan_R_pkey"
+		primary key,
+	mts_tariff_plan varchar(64)        not null,
+	name            varchar(255)       not null,
+	description     text,
+	amount          numeric(12, 4)     not null,
+	is_visible      smallint default 0 not null,
+	user__id        integer,
+	constraint "mts_tariff_plan_R > user" foreign key (user__id) references "user"(user_id) on update cascade
+);
+ALTER TABLE "mts_tariff_plan_R"
+	OWNER TO postgres;
+GRANT ALL ON TABLE "mts_tariff_plan_R" TO postgres;
+GRANT ALL ON TABLE "mts_tariff_plan_R" TO public;
+
+create index "mts_tariff_plan_R_name_idx" on "mts_tariff_plan_R" (name);
+create index "mts_tariff_plan_R_mts_tariff_plan_idx" on "mts_tariff_plan_R" (mts_tariff_plan);
+create index "mts_tariff_plan_R_mts_tariff_amount_idx" on "mts_tariff_plan_R" (amount);
+create index "mts_tariff_plan_R_user__id_idx" on "mts_tariff_plan_R" (user__id);
+create index "mts_tariff_plan_R_is_visible_idx" on "mts_tariff_plan_R" (is_visible);
+
+create table "mts_tariff_plan_H"
+(
+  history_id  bigserial               not null
+    constraint "mts_tariff_plan_H_pkey"
+    primary key,
+  create_date timestamp default now() not null,
+  revision_id bigint,
+  id character varying(64)
+);
+ALTER TABLE "mts_tariff_plan_H"
+  OWNER TO postgres;
+GRANT ALL ON TABLE "mts_tariff_plan_H" TO postgres;
+GRANT ALL ON TABLE "mts_tariff_plan_H" TO public;
+
+comment on table "mts_tariff_plan_H" is 'История тарифных планов';
+comment on column "mts_tariff_plan_H".history_id is 'Идентификатор';
+comment on column "mts_tariff_plan_H".create_date is 'Дата создания ревизии';
+comment on column "mts_tariff_plan_H".revision_id is 'Идентификатор ревизии';
+
+create index "mts_tariff_plan_H_create_date_id" on "mts_tariff_plan_H" (create_date);
+create index "mts_tariff_plan_H_revision_id_idx" on "mts_tariff_plan_H" (revision_id);
+create index "mts_tariff_plan_H_id_idx" on "mts_tariff_plan_H" (id);
+
+CREATE OR REPLACE FUNCTION tf_mts_tariff_plan_ins()
+  RETURNS trigger AS
+$BODY$
+BEGIN
+  insert into "mts_tariff_plan_H" (id) values (NEW.mts_tariff_plan);
+  return NEW;
+END;$BODY$
+LANGUAGE plpgsql VOLATILE
+COST 100;
+ALTER FUNCTION tf_mts_tariff_plan_ins()
+OWNER TO postgres;
+GRANT EXECUTE ON FUNCTION tf_mts_tariff_plan_ins() TO postgres;
+GRANT EXECUTE ON FUNCTION tf_mts_tariff_plan_ins() TO public;
+
+create trigger tf_mts_tariff_plan_ins
+  after insert
+  on mts_tariff_plan
+  for each row
+execute procedure tf_mts_tariff_plan_ins();
+
+create  OR REPLACE function tf_mts_tariff_plan_upd()
+  returns trigger
+language plpgsql
+as $$
+declare
+  ins_id bigint;
+BEGIN
+  -- Копир старую ревизию
+  insert into "mts_tariff_plan_R" (mts_tariff_plan, name, description, amount, is_visible, user__id)
+  values (OLD.mts_tariff_plan,  OLD.name, OLD.description, OLD.amount, OLD.is_visible, OLD.user__id)
+  returning revision_id into ins_id;
+  -- Запоминаем номер сделанной ревизии в таблице истории
+  update "mts_tariff_plan_H" set revision_id=ins_id where id=OLD.mts_tariff_plan and revision_id is null;
+  -- Создаем новую запись в таблице истории
+  insert into "mts_tariff_plan_H" (id) values (NEW.mts_tariff_plan);
+  return NEW;
+END;
+$$
+COST 100;
+ALTER FUNCTION tf_mts_tariff_plan_upd()
+OWNER TO postgres;
+GRANT EXECUTE ON FUNCTION tf_mts_tariff_plan_upd() TO postgres;
+GRANT EXECUTE ON FUNCTION tf_mts_tariff_plan_upd() TO public;
+create trigger tf_mts_tariff_plan_upd
+  after update
+  on mts_tariff_plan
+  for each row
+execute procedure tf_mts_tariff_plan_upd();
+
+
+CREATE OR REPLACE FUNCTION tf_mts_tariff_plan_del()
+  RETURNS trigger AS
+$BODY$
+declare
+  ins_id bigint;
+BEGIN
+  -- Копир старую ревизию
+  insert into "mts_tariff_plan_R" (mts_tariff_plan, name, description, amount, is_visible, user__id)
+  values (OLD.mts_tariff_plan,  OLD.name, OLD.description, OLD.amount, OLD.is_visible, OLD.user__id)
+  returning revision_id into ins_id;
+  -- Запоминаем номер сделанной ревизии в таблице истории
+  update "mts_tariff_plan_H" set revision_id=ins_id where id=OLD.mts_tariff_plan and revision_id is null;
+  insert into "mts_tariff_plan_H" (id) values (OLD.mts_tariff_plan);
+  return OLD;
+END;$BODY$
+LANGUAGE plpgsql VOLATILE
+COST 100;
+ALTER FUNCTION tf_mts_tariff_plan_del()
+OWNER TO postgres;
+GRANT EXECUTE ON FUNCTION tf_mts_tariff_plan_del() TO postgres;
+GRANT EXECUTE ON FUNCTION tf_mts_tariff_plan_del() TO public;
+create trigger tf_mts_tariff_plan_del
+  after delete
+  on mts_tariff_plan
+  for each row
+execute procedure tf_mts_tariff_plan_del();
+
+
+
+----------------------------mts_contract------------------------
+CREATE TABLE public.mts_contract
+(
+  mts_contract_id bigserial PRIMARY KEY not null,
+  krp_company character varying(64) NOT NULL,
+  region character varying(64) NOT NULL,
+  number character varying(20) NOT NULL,
+  user__id int,
+  CONSTRAINT mts_contract_number_check check (number ~ '^\d{1,20}$'),
+  CONSTRAINT "mts_contract > user" FOREIGN KEY (user__id) REFERENCES "user" (user_id) on update cascade ,
+  CONSTRAINT "mts_contract > krp_company" FOREIGN KEY (krp_company)
+  REFERENCES "krp_company" (krp_company)ON UPDATE CASCADE ON DELETE NO ACTION
+);
+ALTER TABLE "mts_contract"
+  OWNER TO postgres;
+GRANT ALL ON TABLE "mts_contract" TO postgres;
+GRANT ALL ON TABLE "mts_contract" TO public;
+
+CREATE INDEX mts_contract_krp_company_idx ON public.mts_contract (krp_company);
+CREATE INDEX mts_contract_user__id_idx ON public.mts_contract (user__id);
+CREATE INDEX mts_contract_number_idx ON public.mts_contract (number);
+CREATE INDEX mts_contract_region_idx ON public.mts_contract (region);
+COMMENT ON COLUMN public.mts_contract.mts_contract_id IS 'Идентификатор';
+COMMENT ON COLUMN public.mts_contract.number IS 'Тел. Номер';
+COMMENT ON COLUMN public.mts_contract.krp_company IS 'Юрлицо КРП';
+COMMENT ON COLUMN public.mts_contract.region IS 'Регион';
+COMMENT ON COLUMN public.mts_contract.user__id IS 'Автор';
+COMMENT ON TABLE public.mts_contract IS 'Контракты MTS';
+
+
+
+create table "mts_contract_R"
+(
+  revision_id bigserial    not null
+    constraint "mts_contract_R_pkey"
+    primary key,
+  mts_contract_id bigint not null,
+  krp_company character varying(64) NOT NULL,
+  region character varying(64) NOT NULL,
+  number character varying(12) NOT NULL,
+  user__id int,
+	constraint "mts_contract_R > user" foreign key (user__id) references "user"(user_id) on update cascade
+);
+ALTER TABLE "mts_contract_R"
+  OWNER TO postgres;
+GRANT ALL ON TABLE "mts_contract_R" TO postgres;
+GRANT ALL ON TABLE "mts_contract_R" TO public;
+CREATE INDEX "mts_contract_R_krp_company_idx" ON "public"."mts_contract_R" (krp_company);
+CREATE INDEX "mts_contract_R_mts_contract_id_idx" ON "public"."mts_contract_R" (mts_contract_id);
+CREATE INDEX "mts_contract_R_user__id_idx" ON "public"."mts_contract_R" (user__id);
+CREATE INDEX "mts_contract_R_number_idx" ON "public"."mts_contract_R" (number);
+CREATE INDEX "mts_contract_R_region_idx" ON "public"."mts_contract_R" (region);
+
+
+create table "mts_contract_H"
+(
+  history_id  bigserial               not null
+    constraint "mts_contract_H_pkey"
+    primary key,
+  create_date timestamp default now() not null,
+  revision_id bigint,
+  id bigint
+);
+ALTER TABLE "mts_contract_H"
+  OWNER TO postgres;
+GRANT ALL ON TABLE "mts_contract_H" TO postgres;
+GRANT ALL ON TABLE "mts_contract_H" TO public;
+
+comment on table "mts_contract_H" is 'История контрактов MTS';
+comment on column "mts_contract_H".history_id is 'Идентификатор';
+comment on column "mts_contract_H".create_date is 'Дата создания ревизии';
+comment on column "mts_contract_H".revision_id is 'Идентификатор ревизии';
+
+create index "mts_contract_H_create_id_idx" on "mts_contract_H" (id);
+create index "mts_contract_H_create_date_idx" on "mts_contract_H" (create_date);
+create index "mts_contract_H_revision_id_idx" on "mts_contract_H" (revision_id);
+
+create trigger tf_mts_contract_ins
+  after insert
+  on mts_contract
+  for each row
+execute procedure tf_ins();
+create trigger tf_mts_contract_upd
+  after update
+  on mts_contract
+  for each row
+execute procedure tf_upd();
+create trigger tf_mts_contract_del
+  after delete
+  on mts_contract
+  for each row
+execute procedure tf_del();
+
+
+
+
+----------------------------------mts_person_account----------------------------------
+CREATE TABLE public.mts_person_account
+(
+  mts_person_account_id bigserial PRIMARY KEY not null,
+  mts_contract_id bigint not null,
+  number character varying(12) NOT NULL,
+  user__id int,
+  CONSTRAINT mts_person_account_number_check check (number ~ '^\d{1,12}$'),
+  CONSTRAINT "mts_person_account > user" FOREIGN KEY (user__id) REFERENCES "user" (user_id) on update cascade ,
+  CONSTRAINT "mts_person_account > mts_contract" FOREIGN KEY (mts_contract_id)
+  REFERENCES "mts_contract" (mts_contract_id)ON UPDATE CASCADE ON DELETE NO ACTION
+);
+ALTER TABLE "mts_person_account"
+  OWNER TO postgres;
+GRANT ALL ON TABLE "mts_person_account" TO postgres;
+GRANT ALL ON TABLE "mts_person_account" TO public;
+
+CREATE INDEX "mts_person_account_mts_contract_id_idx" ON public."mts_person_account" (mts_contract_id);
+CREATE INDEX "mts_person_account_user__id_idx" ON public."mts_person_account" (user__id);
+CREATE INDEX "mts_person_account_number_idx" ON public."mts_person_account" (number);
+COMMENT ON COLUMN public.mts_person_account.mts_person_account_id IS 'Идентификатор';
+COMMENT ON COLUMN public.mts_person_account.number IS 'Номер счета';
+COMMENT ON COLUMN public.mts_person_account.user__id IS 'Автор';
+COMMENT ON TABLE public.mts_person_account IS 'Лицевые счета MTS';
+
+create table "mts_person_account_R"
+(
+  revision_id bigserial    not null
+    constraint "mts_person_account_R_pkey"
+    primary key,
+  mts_person_account_id bigint not null,
+  mts_contract_id bigint not null,
+  number character varying(12) NOT NULL,
+  user__id int,
+	constraint "mts_person_account_R > user" foreign key (user__id) references "user"(user_id) on update cascade
+);
+ALTER TABLE "mts_person_account_R"
+  OWNER TO postgres;
+GRANT ALL ON TABLE "mts_person_account_R" TO postgres;
+GRANT ALL ON TABLE "mts_person_account_R" TO public;
+
+CREATE INDEX "mts_person_account_R_mts_contract_id_idx" ON public."mts_person_account_R" (mts_contract_id);
+CREATE INDEX "mts_person_account_R_user__id_idx" ON public."mts_person_account_R" (user__id);
+CREATE INDEX "mts_person_account_R_number_idx" ON public."mts_person_account_R" (number);
+CREATE INDEX "mts_person_account_R_mts_person_account_id_idx" ON public."mts_person_account_R" (mts_person_account_id);
+
+
+create table "mts_person_account_H"
+(
+  history_id  bigserial               not null
+    constraint "mts_person_account_H_pkey"
+    primary key,
+  create_date timestamp default now() not null,
+  revision_id bigint,
+  id bigint
+);
+ALTER TABLE "mts_person_account_H"
+  OWNER TO postgres;
+GRANT ALL ON TABLE "mts_person_account_H" TO postgres;
+GRANT ALL ON TABLE "mts_person_account_H" TO public;
+
+comment on table "mts_person_account_H" is 'История лиц. счета MTS';
+comment on column "mts_person_account_H".history_id is 'Идентификатор';
+comment on column "mts_person_account_H".create_date is 'Дата создания ревизии';
+comment on column "mts_person_account_H".revision_id is 'Идентификатор ревизии';
+
+create index "mts_person_account_H_id_idx" on "mts_person_account_H" (id);
+create index "mts_person_account_H_create_date_idx" on "mts_person_account_H" (create_date);
+create index "mts_person_account_H_revision_id_idx" on "mts_person_account_H" (revision_id);
+
+create trigger tf_mts_person_account_ins
+  after insert
+  on mts_person_account
+  for each row
+execute procedure tf_ins();
+create trigger tf_mts_person_account_upd
+  after update
+  on mts_person_account
+  for each row
+execute procedure tf_upd();
+create trigger tf_mts_person_account_del
+  after delete
+  on mts_person_account
+  for each row
+execute procedure tf_del();
+
+
+
+
+------------------ mts_number ------------------------------
+CREATE TABLE public.mts_number
+(
+  mts_number_id bigserial PRIMARY KEY not null,
+  mts_person_account_id bigint,
+  number character varying(11),
+  user_id int,
+  mts_tariff_plan character varying(64),
+  limit_amount numeric(10,2) default 0,
+  is_active smallint default 1,
+  active_date date,
+  user__id int default 4000,
+  CONSTRAINT mts_number_number_check check (number ~ '^\d{1,11}$'),
+  CONSTRAINT mts_number_is_active_chk CHECK (is_active = ANY (ARRAY[0, 1])),
+  CONSTRAINT mts_number_limit_chk CHECK (limit_amount >= 0),--назвал поле "суммалимита" что бы не использовать limit
+  CONSTRAINT "mts_number > user" FOREIGN KEY (user_id) REFERENCES "user" (user_id),
+  CONSTRAINT "mts_number > user (createdby)" FOREIGN KEY (user__id) REFERENCES "user" (user_id) on update cascade ,
+  CONSTRAINT "mts_number > mts_tariff_plan" FOREIGN KEY (mts_tariff_plan) REFERENCES "mts_tariff_plan" (mts_tariff_plan) ON UPDATE CASCADE ON DELETE NO ACTION,
+
+  CONSTRAINT "mts_number > mts_person_account" FOREIGN KEY (mts_person_account_id)
+  REFERENCES "mts_person_account" (mts_person_account_id)ON UPDATE CASCADE ON DELETE NO ACTION
+)with( oids=false);
+ALTER TABLE "mts_number"
+  OWNER TO postgres;
+GRANT ALL ON TABLE "mts_number" TO postgres;
+GRANT ALL ON TABLE "mts_number" TO public;
+
+CREATE INDEX "mts_number_mts_person_account_id_idx" ON public."mts_number" (mts_person_account_id);
+CREATE INDEX "mts_number_user__id_idx" ON public."mts_number" (user__id);
+CREATE INDEX "mts_number_user_id_idx" ON public."mts_number" (user_id);
+CREATE INDEX "mts_number_number_idx" ON public."mts_number" (number);
+CREATE INDEX "mts_number_mts_tariff_plan_idx" ON public."mts_number" (mts_tariff_plan);
+CREATE INDEX "mts_number_limit_amount_idx" ON public."mts_number" (limit_amount);
+CREATE INDEX "mts_number_active_date_idx" ON public."mts_number" (active_date);
+CREATE INDEX "mts_number_is_active_idx" ON public."mts_number" (is_active);
+
+COMMENT ON COLUMN public.mts_number.mts_number_id IS 'Идентификатор';
+COMMENT ON COLUMN public.mts_number.mts_person_account_id IS 'Лицевой счет';
+COMMENT ON COLUMN public.mts_number.number IS 'Тел. Номер';
+COMMENT ON COLUMN public.mts_number.user_id IS 'Пользователь';
+COMMENT ON COLUMN public.mts_number.mts_tariff_plan IS 'Тарифный план';
+COMMENT ON COLUMN public.mts_number.limit_amount IS 'Дополнительный лимит';
+COMMENT ON COLUMN public.mts_number.is_active IS 'Активен';
+COMMENT ON COLUMN public.mts_number.user__id IS 'Автор';
+COMMENT ON COLUMN public.mts_number.active_date IS 'Дата передачи';
+COMMENT ON TABLE public.mts_number IS 'Номера телефонов MTS';
+
+create table "mts_number_R"
+(
+  revision_id bigserial    not null
+    constraint "mts_number_R_pkey"
+    primary key,
+  mts_number_id bigint,
+  mts_person_account_id bigint,
+  number character varying(11),
+  user_id int,
+  mts_tariff_plan character varying(64),
+  limit_amount numeric(10,2) default 0,
+  is_active smallint default 0,
+  active_date date,
+  user__id int,
+	constraint "mts_number_R > user" foreign key (user__id) references "user"(user_id) on update cascade
+)with( oids=false);
+ALTER TABLE "mts_number_R"
+  OWNER TO postgres;
+GRANT ALL ON TABLE "mts_number_R" TO postgres;
+GRANT ALL ON TABLE "mts_number_R" TO public;
+
+CREATE INDEX "mts_number_R_mts_person_account_id_idx" ON public."mts_number_R" (mts_person_account_id);
+CREATE INDEX "mts_number_R_user__id_idx" ON public."mts_number_R" (user__id);
+CREATE INDEX "mts_number_R_user_id_idx" ON public."mts_number_R" (user_id);
+CREATE INDEX "mts_number_R_number_idx" ON public."mts_number_R" (number);
+CREATE INDEX "mts_number_R_mts_tariff_plan_idx" ON public."mts_number_R" (mts_tariff_plan);
+CREATE INDEX "mts_number_R_active_date_idx" ON public."mts_number_R" (active_date);
+CREATE INDEX "mts_number_R_limit_amount_idx" ON public."mts_number_R" (limit_amount);
+CREATE INDEX "mts_number_R_is_active_idx" ON public."mts_number_R" (is_active);
+CREATE INDEX "mts_number_R_mts_number_id_idx" ON public."mts_number_R" (mts_number_id);
+
+
+create table "mts_number_H"
+(
+  history_id  bigserial               not null
+    constraint "mts_number_H_pkey"
+    primary key,
+  create_date timestamp default now() not null,
+  revision_id bigint,
+  id bigint
+) with (oids=false);
+ALTER TABLE "mts_number_H"
+  OWNER TO postgres;
+GRANT ALL ON TABLE "mts_number_H" TO postgres;
+GRANT ALL ON TABLE "mts_number_H" TO public;
+
+
+comment on table "mts_number_H" is 'История изменения номеров MTS';
+comment on column "mts_number_H".history_id is 'Идентификатор';
+comment on column "mts_number_H".create_date is 'Дата создания ревизии';
+comment on column "mts_number_H".revision_id is 'Идентификатор ревизии';
+
+create index "mts_number_H_id_idx" on "mts_number_H" (id);
+create index "mts_number_H_create_date_idx" on "mts_number_H" (create_date);
+create index "mts_numbert_H_revision_id_idx" on "mts_number_H" (revision_id);
+
+CREATE OR REPLACE function tf_mts_number_ins()
+  returns trigger
+language plpgsql
+as $$
+declare
+  o integer;
+  n varchar;
+BEGIN
+  execute 'insert into "' || TG_TABLE_NAME || '_H" (id) values ($1.' || TG_TABLE_NAME || '_id)' using NEW;
+  if (NEW.is_active = 1) then
+    update mts_number set is_active=0 , user__id  = NEW.user__id where mts_number_id <> NEW.mts_number_id and is_active =1 and number = NEW.number;-- using NEW;
+  end if;
+  return NEW;
+END;
+$$;
+ALTER FUNCTION tf_mts_number_ins()
+OWNER TO postgres;
+GRANT EXECUTE ON FUNCTION tf_mts_number_ins() TO postgres;
+GRANT EXECUTE ON FUNCTION tf_mts_number_ins() TO public;
+
+create trigger tf_mts_number_ins_a
+  after insert
+  on mts_number
+  for each row
+execute procedure tf_mts_number_ins();
+create trigger tf_mts_number_upd_a
+  after update
+  on mts_number
+  for each row
+execute procedure tf_upd();
+create trigger tf_mts_number_del_a
+  after delete
+  on mts_number
+  for each row
+execute procedure tf_del();
+
+---------------------------mts_period-----------------------------------
+CREATE TABLE public.mts_period
+(
+  mts_period_id bigserial PRIMARY KEY not null,
+  period date not null
+);
+ALTER TABLE mts_period
+  OWNER TO postgres;
+GRANT ALL ON TABLE mts_period TO postgres;
+GRANT ALL ON TABLE mts_period TO public;
+CREATE INDEX "mts_period_period_idx" ON public."mts_period" (period);
+COMMENT ON COLUMN public.mts_period.mts_period_id IS 'Идентификатор';
+COMMENT ON COLUMN public.mts_period.period IS 'Период';
+COMMENT ON TABLE public.mts_period IS 'Периоды MTS';
+
+----------------------mts_number_mts_period------------------------------
+CREATE TABLE public.mts_number_mts_period
+(
+  mts_number_mts_period_id bigserial PRIMARY KEY not null,
+  mts_number_id bigint not null,
+  mts_period_id bigint not null,
+  amount numeric(12,4) not null default 0,
+  mts_tariff_plan character varying(64) default NULL,
+  user_id int,
+  user__id int default 4000,
+  description text,
+  CONSTRAINT mts_number_mts_period_amount_chk CHECK (amount >= 0),
+  CONSTRAINT "mts_number_mts_priod > mts_period" FOREIGN KEY (mts_period_id) REFERENCES "mts_period" (mts_period_id) ON UPDATE CASCADE ON DELETE CASCADE ,
+  CONSTRAINT "mts_number_mts_priod > mts_number" FOREIGN KEY (mts_number_id) REFERENCES "mts_number" (mts_number_id) ON UPDATE CASCADE ON DELETE NO ACTION,
+  CONSTRAINT "mts_number_mts_priod > mts_tariff_plan" FOREIGN KEY (mts_tariff_plan) REFERENCES mts_tariff_plan (mts_tariff_plan) ON UPDATE NO ACTION ON DELETE NO ACTION,
+  CONSTRAINT "mts_number_mts_priod > user" FOREIGN KEY (user_id) REFERENCES "user" (user_id),
+  CONSTRAINT "mts_number_mts_priod > user (createdby)" FOREIGN KEY (user__id) REFERENCES "user" (user_id) on update cascade
+)WITH (
+  OIDS=FALSE
+);
+ALTER TABLE mts_number_mts_period
+  OWNER TO postgres;
+GRANT ALL ON TABLE mts_number_mts_period TO postgres;
+GRANT ALL ON TABLE mts_number_mts_period TO public;
+
+CREATE INDEX "mts_number_mts_period_mts_number_mts_period_idx" ON public."mts_number_mts_period" (mts_number_mts_period_id);
+CREATE INDEX "mts_number_mts_period_mts_period_id_idx" ON public."mts_number_mts_period" (mts_period_id);
+CREATE INDEX "mts_number_mts_period_mts_number_id_idx" ON public."mts_number_mts_period" (mts_number_id);
+CREATE INDEX "mts_number_mts_period_amount_idx" ON public."mts_number_mts_period" (amount);
+CREATE INDEX "mts_number_mts_period_mts_tariff_plan_idx" ON public."mts_number_mts_period" (mts_tariff_plan);
+CREATE INDEX "mts_number_mts_period_user__id_idx" ON public."mts_number_mts_period" (user__id);
+CREATE INDEX "mts_number_mts_period_user_id_idx" ON public."mts_number_mts_period" (user_id);
+
+COMMENT ON COLUMN public.mts_number_mts_period.mts_number_mts_period_id IS 'Идентификатор';
+COMMENT ON COLUMN public.mts_number_mts_period.mts_period_id IS 'Период';
+COMMENT ON COLUMN public.mts_number_mts_period.mts_number_id IS 'Номер';
+COMMENT ON COLUMN public.mts_number_mts_period.amount IS 'Сумма';
+COMMENT ON COLUMN public.mts_number_mts_period.mts_tariff_plan IS 'Тарифный план';
+COMMENT ON TABLE public.mts_number_mts_period IS 'Параметры номера за период MTS';
+COMMENT ON COLUMN public.mts_number_mts_period.user_id IS 'Пользователь';
+COMMENT ON COLUMN public.mts_number_mts_period.user__id IS 'Автор';
+COMMENT ON COLUMN public.mts_number_mts_period.description IS 'Обоснование';
+
+
+-------------------------------------------mts_period_files------------------------------------------------------
+/*В данной таблице хранятся файлы с выставленными счетами в pdf, таблица имеет следующие поля:
+mts_period_file_id - bigserial - Идентификатор
+krp_company - varchar(64) - Юрлицо КРП, ключ на krp_company, not null, cascade update
+  mts_period_id - bigint - Период, ключ на mts_period, not null, cascade delete update
+files_id - bigserial - Файл - ключ на files, not null, cascade update
+  user_id - integer - Прикрепивший, ключ на user, not null, cascade update
+create_date - timestamp without time zone - Дата создания, значение по умолчанию now(), not null
+amount - numeric(10, 2) - сумма счета, >=0, not null
+is_approve - smallint - Утвержден, значение по умолчанию 0, допустимые значения 0, 1, not null
+*/
+CREATE TABLE mts_period_files
+(
+  mts_period_file_id bigserial NOT NULL,
+  mts_period_id bigint not null,
+  --filename character varying(255) NOT NULL, -- Название файла
+  files_id  bigserial not null,
+  krp_company character varying(64) NOT NULL,
+  is_approve smallint NOT NULL DEFAULT 0,
+  amount numeric(10,2) not null , -- Общая сумма счета к оплате
+  create_date timestamp without time zone default now() not null,
+  user_id integer not null,
+
+  CONSTRAINT mts_period_files_pkey PRIMARY KEY (mts_period_file_id),
+  CONSTRAINT "mts_period_file > krp_company" FOREIGN KEY (krp_company) REFERENCES krp_company (krp_company) ON UPDATE CASCADE ON DELETE NO ACTION,
+  CONSTRAINT "mts_period_file > mts_period" FOREIGN KEY (mts_period_id) REFERENCES mts_period (mts_period_id) ON UPDATE CASCADE ON DELETE CASCADE ,
+  CONSTRAINT "mts_period_file > files" FOREIGN KEY (files_id) REFERENCES files (files_id) ON UPDATE CASCADE ON DELETE NO ACTION ,
+  CONSTRAINT "mts_period_file > user" FOREIGN KEY (user_id) REFERENCES "user" (user_id) ON UPDATE CASCADE ON DELETE NO ACTION ,
+  CONSTRAINT mts_period_file_amount_chk CHECK (amount >= 0::numeric),
+  CONSTRAINT mts_period_file_is_approve_chk CHECK (is_approve = ANY (ARRAY[0, 1]))
+)
+WITH (
+OIDS=FALSE
+);
+ALTER TABLE mts_period_files
+  OWNER TO postgres;
+GRANT ALL ON TABLE mts_period_files TO postgres;
+GRANT ALL ON TABLE mts_period_files TO public;
+COMMENT ON TABLE mts_period_files IS 'Разобранные документы полученные от мобильных операторов';
+COMMENT ON COLUMN mts_period_files.mts_period_id IS 'Отчетный период';
+COMMENT ON COLUMN mts_period_files.files_id IS 'Название файла';
+COMMENT ON COLUMN mts_period_files.krp_company IS 'Юрлицо КРП';
+COMMENT ON COLUMN mts_period_files.amount IS 'Общая сумма счета к оплате';
+COMMENT ON COLUMN mts_period_files.is_approve IS 'Утверждено';
+COMMENT ON COLUMN mts_period_files.mts_period_file_id IS 'Идентификатор';
+COMMENT ON COLUMN mts_period_files.create_date IS 'Дата создания';
+COMMENT ON COLUMN mts_period_files.user_id IS 'Пользователь';
+
+CREATE INDEX mts_period_files_krp_company_idx ON mts_period_files (krp_company);
+CREATE INDEX mts_period_files_files_id_idx ON mts_period_files (files_id);
+CREATE INDEX mts_period_files_is_approve_idx ON mts_period_files (is_approve);
+CREATE INDEX mts_period_files_mts_period_id_idx ON mts_period_files  (mts_period_id);
+CREATE INDEX mts_period_files_amount_idx ON mts_period_files (amount);
+CREATE INDEX mts_period_files_create_date_idx ON mts_period_files  (create_date);
+CREATE INDEX mts_period_files_user_id_idx ON mts_period_files (user_id);
+
+
+
+---------------------------------------------------------------------
+
+/*Статистика дополнительных услуг - mts_add_service
+
+ В таблице содержится информация о подключении дополнительных услуг, в таблице имеются следующие поля:
+mts_add_service_id - bigserial - Идентификатор
+mts_period_id - bigint - Период - ключ на mts_period, not null, cascade update delete
+mts_number_id - bigint - Номер - ключ на mts_number, not null, cascade update
+name - varchar(127) - Услуга - not null
+service_date - timestamp without time zone - Дата списания - not null
+cost - numeric(12,2) - Стоимость - >=0, not null
+
+*/
+CREATE TABLE mts_add_service
+(
+  mts_add_service_id bigserial PRIMARY KEY NOT NULL,
+  mts_number_mts_period_id bigint not null,
+  name character varying(127) not null,
+  service_date timestamp without time zone not null,
+  start_date timestamp without time zone not null,
+  end_date timestamp without time zone not null,
+  cost numeric(12,2) -- Cумма к оплате
+    CONSTRAINT mts_add_service_cost_chk CHECK (cost >= 0::numeric),
+
+  CONSTRAINT "mts_addsrvice > mts_number_mts_period" FOREIGN KEY (mts_number_mts_period_id) REFERENCES mts_number_mts_period (mts_number_mts_period_id) ON UPDATE CASCADE ON DELETE CASCADE
+)
+WITH (
+OIDS=FALSE
+);
+ALTER TABLE mts_add_service
+  OWNER TO postgres;
+GRANT ALL ON TABLE mts_add_service TO postgres;
+GRANT ALL ON TABLE mts_add_service TO public;
+COMMENT ON TABLE mts_add_service IS 'Статистика дополнительных услуг ';
+COMMENT ON COLUMN mts_add_service.mts_number_mts_period_id IS 'Отчетный период';
+COMMENT ON COLUMN mts_add_service.cost IS 'Cумма к оплате';
+COMMENT ON COLUMN mts_add_service.name IS 'Услуга';
+COMMENT ON COLUMN mts_add_service.start_date IS 'Начало услуги';
+COMMENT ON COLUMN mts_add_service.end_date IS 'Окончание услуги';
+
+
+CREATE INDEX mts_add_service_service_date_idx ON mts_add_service (service_date);
+CREATE INDEX mts_add_service_start_date_idx ON mts_add_service (start_date);
+CREATE INDEX mts_add_service_end_date_idx ON mts_add_service (end_date);
+CREATE INDEX mts_add_service_cost_idx ON mts_add_service (cost);
+CREATE INDEX mts_add_service_name_idx ON mts_add_service USING btree (name);
+CREATE INDEX mts_add_service_mts_number_mts_period_id_idx ON mts_add_service USING btree (mts_number_mts_period_id);
+
+------------------mts_aggregate--------------------
+CREATE TABLE public.mts_aggregate
+(
+  mts_aggregate_id bigserial PRIMARY KEY not null,
+  mts_number_mts_period_id bigint not null,
+  mts_service_agg_type character varying(64) NOT NULL,
+  cost numeric(12,4) not null,
+  discount numeric(12,4) not null,
+  CONSTRAINT mts_aggregate_cost_chk CHECK (cost >= 0),
+  CONSTRAINT "mts_aggregate > mts_number_period" FOREIGN KEY (mts_number_mts_period_id) REFERENCES mts_number_mts_period (mts_number_mts_period_id) ON UPDATE CASCADE ON DELETE restrict ,
+  CONSTRAINT "mts_aggregate > mts_service_agg_type" FOREIGN KEY (mts_service_agg_type)
+  REFERENCES mts_service_agg_type (mts_service_agg_type) ON UPDATE CASCADE ON DELETE restrict
+)with (oids =false);
+ALTER TABLE "mts_aggregate"
+  OWNER TO postgres;
+GRANT ALL ON TABLE "mts_aggregate" TO postgres;
+GRANT ALL ON TABLE "mts_aggregate" TO public;
+
+CREATE INDEX "mts_aggregate_mts_number_mts_period_id_idx" ON public."mts_aggregate" (mts_number_mts_period_id);
+CREATE INDEX "mts_aggregate_service_agg_type_idx" ON public."mts_aggregate" (mts_service_agg_type);
+CREATE INDEX "mts_aggregate_cost_idx" ON public."mts_aggregate" (cost);
+CREATE INDEX "mts_aggregate_discount_idx" ON public."mts_aggregate" (discount);
+COMMENT ON COLUMN public.mts_aggregate.mts_aggregate_id IS 'Идентификатор';
+COMMENT ON COLUMN public.mts_aggregate.mts_number_mts_period_id IS 'Период';
+COMMENT ON COLUMN public.mts_aggregate.cost IS 'Сумма';
+COMMENT ON COLUMN public.mts_aggregate.discount IS 'Скидка';
+COMMENT ON COLUMN public.mts_aggregate.mts_service_agg_type IS 'Тип услуги';
+COMMENT ON TABLE public.mts_aggregate IS 'Статистика дополнительных услуг MTS';
+
+
+
+----------------------------mts_detail------------------------
+CREATE TABLE mts_detail
+(
+  mts_detail_id bigserial NOT NULL,
+  mts_number_mts_period_id bigint not null,
+  service_date timestamp without time zone NOT NULL, -- Время оказания услуги
+  destination character varying(100),
+  operator_name character varying(100), -- Название мобильного оператора
+  operator_division character varying(100), -- Название регионального подразделения мобильного оператора
+  service_type character varying(16) not null , -- Тип услуги
+  amount character varying, -- Количество оказанной услуги, зависит от service_type
+  cost numeric(12,4) not null ,
+  specified_amount character varying, -- Приведенное количество оказанной услуги в соответствии с тарифом. Зависит от service_type
+  specified_cost numeric(12,4) not null , -- Приведенная стоимость услуги в соответствии с тарифом
+  is_in smallint not null , -- Входящий звонок
+  CONSTRAINT mts_details_pkey PRIMARY KEY (mts_detail_id),
+  CONSTRAINT "mts_details > mts_number_mts_period" FOREIGN KEY (mts_number_mts_period_id) REFERENCES mts_number_mts_period (mts_number_mts_period_id) ON UPDATE CASCADE ON DELETE CASCADE,
+  CONSTRAINT mts_detail_cost_chk CHECK (cost >= 0::numeric),
+  CONSTRAINT mts_detail_is_in_chk CHECK (is_in = ANY (ARRAY[0, 1])),
+  CONSTRAINT mts_detail_specified_cost_chk CHECK (specified_cost >= 0::numeric)
+)
+WITH (
+OIDS=FALSE
+);
+ALTER TABLE mts_detail
+  OWNER TO postgres;
+GRANT ALL ON TABLE mts_detail TO postgres;
+GRANT ALL ON TABLE mts_detail TO public;
+COMMENT ON COLUMN mts_detail.mts_detail_id IS 'Идентификатор';
+COMMENT ON COLUMN mts_detail.mts_number_mts_period_id IS 'Период\номер';
+--COMMENT ON COLUMN mts_detail.mts_number_id IS 'Тел. номер';
+COMMENT ON COLUMN mts_detail.service_date IS 'Дата услуги';
+COMMENT ON COLUMN mts_detail.destination IS 'Номер второго абонента';
+COMMENT ON COLUMN mts_detail.operator_name IS 'Название мобильного оператора';
+COMMENT ON COLUMN mts_detail.operator_division IS 'Название регионального подразделения мобильного оператора';
+COMMENT ON COLUMN mts_detail.service_type IS 'Тип услуги';
+--COMMENT ON COLUMN mts_detail.a IS 'Какая-та шняга';
+COMMENT ON COLUMN mts_detail.amount IS 'Количество оказанной услуги, зависит от service_type';
+COMMENT ON COLUMN mts_detail.specified_amount IS 'Приведенное количество оказанной услуги в соответствии с тарифом. Зависит от service_type';
+COMMENT ON COLUMN mts_detail.specified_cost IS 'Приведенная стоимость услуги в соответствии с тарифом';
+COMMENT ON COLUMN mts_detail.is_in IS 'Входящий звонок';
+COMMENT ON table mts_detail is 'Детализированная статистика MTS';
+
+CREATE INDEX mts_detail_destination_idx ON mts_detail (destination COLLATE pg_catalog."default");
+CREATE INDEX mts_detail_idx ON mts_detail (mts_detail_id);
+CREATE INDEX mts_detail_is_in_idx ON mts_detail (is_in);
+CREATE INDEX mts_detail_operator_division_idx ON mts_detail USING btree (operator_division COLLATE pg_catalog."default");
+CREATE INDEX mts_detail_operator_name_idx ON mts_detail USING btree (operator_name COLLATE pg_catalog."default");
+CREATE INDEX mts_detail_mts_number_mts_period_id_idx ON mts_detail USING btree (mts_number_mts_period_id);
+CREATE INDEX mts_detail_service_date_idx ON mts_detail USING btree (service_date);
+CREATE INDEX mts_detail_service_type_idx ON mts_detail USING btree (service_type COLLATE pg_catalog."default");
+CREATE INDEX mts_detail_specified_amount_idx ON mts_detail USING btree (specified_amount COLLATE pg_catalog."default");
+CREATE INDEX mts_detail_amount_idx ON mts_detail USING btree (amount COLLATE pg_catalog."default");
+CREATE INDEX mts_detail_specified_cost_idx ON mts_detail (specified_cost);
+CREATE INDEX mts_detail_cost_idx ON mts_detail (cost);
+
+
+
+---------------------------------mts_phone_limit----------------------------------
+CREATE TABLE public.mts_phone_limit
+(
+  mts_phone_limit_id bigserial primary key ,
+  mts_number_mts_period_id bigint not null,
+  brake_limit numeric(12,4),
+  CONSTRAINT "mts_phone_limit > mts_number_mts_period" FOREIGN KEY (mts_number_mts_period_id) REFERENCES mts_number_mts_period (mts_number_mts_period_id) ON UPDATE CASCADE ON DELETE NO ACTION
+);
+ALTER TABLE mts_phone_limit
+  OWNER TO postgres;
+GRANT ALL ON TABLE mts_phone_limit TO postgres;
+GRANT ALL ON TABLE mts_phone_limit TO public;
+alter SEQUENCE  mts_phone_limit_mts_phone_limit_id_seq
+OWNER TO postgres;
+GRANT ALL ON SEQUENCE mts_phone_limit_mts_phone_limit_id_seq TO postgres;
+GRANT ALL ON SEQUENCE mts_phone_limit_mts_phone_limit_id_seq TO public;
+
+CREATE INDEX "mts_phone_limit_mts_number_mts_period_id_idx" ON public."mts_phone_limit" (mts_number_mts_period_id);
+CREATE INDEX "mts_phone_limit_brake_limit_idx" ON public."mts_phone_limit" (brake_limit);
+
+GRANT ALL ON SEQUENCE mts_add_service_mts_add_service_id_seq to public;
+GRANT ALL ON SEQUENCE mts_aggregate_mts_aggregate_id_seq to public;
+GRANT ALL ON SEQUENCE "mts_contract_H_history_id_seq" to public;
+GRANT ALL ON SEQUENCE "mts_contract_R_revision_id_seq" to public;
+GRANT ALL ON SEQUENCE mts_contract_mts_contract_id_seq to public;
+GRANT ALL ON SEQUENCE mts_detail_mts_detail_id_seq to public;
+GRANT ALL ON SEQUENCE "mts_number_H_history_id_seq" to public;
+GRANT ALL ON SEQUENCE "mts_number_R_revision_id_seq" to public;
+GRANT ALL ON SEQUENCE mts_number_mts_number_id_seq to public;
+GRANT ALL ON SEQUENCE mts_number_mts_period_mts_number_mts_period_id_seq to public;
+GRANT ALL ON SEQUENCE mts_period_files_files_id_seq to public;
+GRANT ALL ON SEQUENCE mts_period_files_mts_period_file_id_seq to public;
+GRANT ALL ON SEQUENCE mts_period_mts_period_id_seq to public;
+GRANT ALL ON SEQUENCE "mts_person_account_H_history_id_seq" to public;
+GRANT ALL ON SEQUENCE "mts_person_account_R_revision_id_seq" to public;
+GRANT ALL ON SEQUENCE mts_person_account_mts_person_account_id_seq to public;
+GRANT ALL ON SEQUENCE mts_phone_limit_mts_phone_limit_id_seq to public;
+GRANT ALL ON SEQUENCE "mts_tariff_plan_H_history_id_seq" to public;
+GRANT ALL ON SEQUENCE "mts_tariff_plan_R_revision_id_seq" to public;
+
+--psql -U web -d common -d myDataBase -a -f ./SQL/back/common_public_mts_detail.sql
+
+SELECT setval('public.mts_add_service_mts_add_service_id_seq',(select max(mts_detail_id) from mts_detail), true);
+SELECT setval('public.mts_aggregate_mts_aggregate_id_seq',(select max(mts_aggregate_id) from mts_aggregate),true);
+SELECT setval('public."mts_contract_H_history_id_seq"',(select max(history_id) from "mts_contract_H"),true);
+SELECT setval('public."mts_contract_R_revision_id_seq"',(select max(revision_id) from "mts_contract_R"),true);
+SELECT setval('public.mts_contract_mts_contract_id_seq',(select max(mts_contract_id) from mts_contract),true);
+SELECT setval('public.mts_detail_mts_detail_id_seq', (select max(mts_detail_id) from mts_detail), true);
+SELECT setval('public."mts_number_H_history_id_seq"',(select max(history_id) from "mts_number_H"),true);
+SELECT setval('public."mts_number_R_revision_id_seq"',(select max(revision_id) from "mts_number_R"),true);
+SELECT setval('public.mts_number_mts_number_id_seq',(select max(mts_number_id) from mts_number ),true);
+SELECT setval('public.mts_number_mts_period_mts_number_mts_period_id_seq',(select max(mts_number_mts_period_id) from mts_number_mts_period),true);
+SELECT setval('public.mts_period_files_files_id_seq',(select max(files_id) from mts_period_files),true);
+SELECT setval('public.mts_period_files_mts_period_file_id_seq',(select max(mts_period_file_id) from mts_period_files),true);
+SELECT setval('public.mts_period_mts_period_id_seq',(select max(mts_period_id) from mts_period),true);
+SELECT setval('public."mts_person_account_H_history_id_seq"',(select max(history_id) from "mts_person_account_H"),true);
+SELECT setval('public."mts_person_account_R_revision_id_seq"',(select max(revision_id) from "mts_person_account_R"),true);
+SELECT setval('public.mts_person_account_mts_person_account_id_seq',(select max(mts_person_account_id) from mts_person_account),true);
+SELECT setval('public.mts_phone_limit_mts_phone_limit_id_seq',(select max(mts_phone_limit_id) from mts_phone_limit),true);
+SELECT setval('public."mts_tariff_plan_H_history_id_seq"',(select max(history_id) from "mts_tariff_plan_H"),true);
+SELECT setval('public."mts_tariff_plan_R_revision_id_seq"',(select max(revision_id) from "mts_tariff_plan_R"),true);
+
+-------------------------------------------functions--------------------------------------
+create or replace function fn_set_mts_number_active_date()
+  returns boolean
+language plpgsql
+as $$
+begin
+
+  update mts_number set active_date =
+  (select md.service_date from mts_detail md
+    join mts_number_mts_period mnmp2 on mnmp2.mts_number_mts_period_id = md.mts_number_mts_period_id
+  where md.service_date=( select min(md2.service_date) from mts_detail md2
+    join mts_number_mts_period mnmp on mnmp.mts_number_mts_period_id = md2.mts_number_mts_period_id
+  where mnmp.mts_number_id = mts_number_id) and mnmp2.mts_number_id = mts_number_id)
+  where active_date is null;
+  return true;
+end;
+$$;
+ALTER FUNCTION fn_set_mts_number_active_date()
+OWNER TO postgres;
+GRANT EXECUTE ON FUNCTION fn_set_mts_number_active_date() TO postgres;
+GRANT EXECUTE ON FUNCTION fn_set_mts_number_active_date() TO public;
+
+/*create function fn_set_mts_number_active_date()
+  returns boolean
+language plpgsql
+as $$
+begin
+
+  update mts_number set active_date =
+  (select md.service_date from mts_detail md
+  where md.service_date=( select min(md2.service_date) from mts_detail md2 where md2.mts_number_id = mts_number_id) and md.mts_number_id = mts_number_id)
+  where active_date is null;
+  return true;
+end;
+$$;*/
+
+
+--drop function fn_set_mts_user_from_period( int)
+
+create or replace function fn_set_mts_user_from_period(toperiod int)
+  returns boolean
+language plpgsql
+as $$
+begin
+
+	update mts_number_mts_period set (user_id,mts_tariff_plan) = (prev.user_id, prev.mts_tariff_plan)
+	from mts_number_mts_period prev
+	where prev.mts_number_id = mts_number_mts_period.mts_number_id
+				and prev.mts_period_id = (select pp.mts_period_id from mts_period pp
+						join mts_period cur on cur.period - interval '1 month' = pp.period and cur.mts_period_id = toperiod)
+				and mts_number_mts_period.mts_period_id = toperiod;
+return true;
+end;
+$$;
+ALTER FUNCTION fn_set_mts_user_from_period(int)
+OWNER TO postgres;
+GRANT EXECUTE ON FUNCTION fn_set_mts_user_from_period(int) TO postgres;
+GRANT EXECUTE ON FUNCTION fn_set_mts_user_from_period(int) TO public;
+
+/*
+create function fn_set_mts_user_from_period(toperiod integer)
+  returns boolean
+language plpgsql
+as $$
+begin
+
+  update mts_number_mts_period set user_id =
+  (select prev.user_id from mts_number_mts_period prev where prev.mts_number_id = mts_number_mts_period.mts_number_id and prev.mts_period_id = (select pp.mts_period_id from mts_period pp
+    join mts_period cur on cur.period - interval '1 month' = pp.period and cur.mts_period_id = toperiod) order by mts_number_mts_period_id desc limit 1),
+    mts_tariff_plan=
+    (select prev.mts_tariff_plan from mts_number_mts_period prev where prev.mts_number_id = mts_number_mts_period.mts_number_id and prev.mts_period_id = (select pp.mts_period_id from mts_period pp
+      join mts_period cur on cur.period - interval '1 month' = pp.period and cur.mts_period_id = toperiod )order by mts_number_mts_period_id desc limit 1)
+
+  where mts_number_mts_period.mts_period_id = toperiod;
+  return true;
+end;
+$$;
+
+
+ */
+--можно проверить, но похоже желательно добавить поле-проверку на автозаполнение во избежание коллизий
+--select prev.user_id,prev.mts_number_id from mts_number_mts_period prev where prev.mts_period_id = (select pp.mts_period_id from mts_period pp join mts_period cur on cur.period - interval '1 month' = pp.period and cur.mts_period_id = 7);
+
+CREATE OR REPLACE FUNCTION comparator(varchar,varchar, varchar) RETURNS boolean AS
+$$
+SELECT CASE
+       WHEN ($2 isnull ) THEN true
+       WHEN ($3 = '>') THEN $1>$2
+       WHEN ($3 = '<') THEN $1<$2
+       WHEN ($3 = '<>') then $1<>$2
+       ELSE $1 = $2
+       END;
+$$ LANGUAGE SQL IMMUTABLE;
+ALTER FUNCTION comparator(varchar,varchar, varchar)
+OWNER TO postgres;
+GRANT EXECUTE ON FUNCTION comparator(varchar,varchar, varchar) TO postgres;
+GRANT EXECUTE ON FUNCTION comparator(varchar,varchar, varchar) TO public;
+CREATE OR REPLACE FUNCTION comparator(real,real, varchar) RETURNS boolean AS
+$$
+SELECT CASE
+       WHEN ($2 isnull ) THEN true
+       WHEN ($3 = '>') THEN $1>$2
+       WHEN ($3 = '<') THEN $1<$2
+       WHEN ($3 = '<>') then $1<>$2
+       ELSE $1 = $2
+       END;
+$$ LANGUAGE SQL IMMUTABLE;
+ALTER FUNCTION comparator(real,real, varchar)
+OWNER TO postgres;
+GRANT EXECUTE ON FUNCTION comparator(real,real, varchar) TO postgres;
+GRANT EXECUTE ON FUNCTION comparator(real,real, varchar) TO public;
+CREATE OR REPLACE FUNCTION comparator(bigint,bigint, varchar) RETURNS boolean AS
+$$
+SELECT CASE
+       WHEN ($2 isnull ) THEN true
+       WHEN ($3 = '>') THEN $1>$2
+       WHEN ($3 = '<') THEN $1<$2
+       WHEN ($3 = '<>') then $1<>$2
+       ELSE $1 = $2
+       END;
+$$ LANGUAGE SQL IMMUTABLE;
+ALTER FUNCTION comparator(bigint,bigint, varchar)
+OWNER TO postgres;
+GRANT EXECUTE ON FUNCTION comparator(bigint,bigint, varchar) TO postgres;
+GRANT EXECUTE ON FUNCTION comparator(bigint,bigint, varchar) TO public;
+---------------------------add groupes--------------------------------------
+INSERT INTO "public"."groupe_type"
+("groupe_type", "name", "icon_filename", "description", "sort", "sort_show", "is_visible", "abbreviation", "uid36")
+VALUES ('MTS',
+        'Доступ к статистике мобильных телефонов МТС',
+        NULL,
+        '<p>Управление группами по работе с оператором МТС<br>Доступ к статистике мобильных телефонов МТС</p>',
+        DEFAULT,
+        DEFAULT, 1, 'MTS', NULL);
+
+INSERT INTO "public"."groupe" ("code", "name", "is_disabled", "ldap", "groupe_type", "is_manager", "is_special", "is_inherit", "department_name", "abbreviation", "user__id")
+VALUES ( 'MTS_ADMIN', 'Администратор функционала МТС', 0, NULL, 'MTS', DEFAULT, DEFAULT, DEFAULT, NULL, NULL, 7464);
+INSERT INTO "public"."groupe" ("code", "name", "is_disabled", "ldap", "groupe_type", "is_manager", "is_special", "is_inherit", "department_name", "abbreviation", "user__id")
+VALUES ( 'MTS_BLOCKED', 'Скрытая стаистика', 0, NULL, 'MTS', DEFAULT, DEFAULT, DEFAULT, NULL, NULL, 7464)
+;
+INSERT INTO "public"."groupe" ("code", "name", "is_disabled", "ldap", "groupe_type", "is_manager", "is_special", "is_inherit", "department_name", "abbreviation", "user__id")
+VALUES ( 'MTS_DETAIL', 'Доступ к отображению детальной статистики', 0, NULL, 'MTS', DEFAULT, DEFAULT, DEFAULT, NULL, NULL, 7464)
+;
+INSERT INTO "public"."groupe" ("code", "name", "is_disabled", "ldap", "groupe_type", "is_manager", "is_special", "is_inherit", "department_name", "abbreviation", "user__id")
+VALUES ( 'MTS_GIVE_NUMBER', 'Группа получателей уведомлений о выдаче симки в сочетании с доступо к юрлицам', 0, NULL, 'MTS', DEFAULT, DEFAULT, DEFAULT, NULL, NULL, 7464)
+;
+INSERT INTO "public"."groupe" ("code", "name", "is_disabled", "ldap", "groupe_type", "is_manager", "is_special", "is_inherit", "department_name", "abbreviation", "user__id")
+VALUES ('MTS_VIEW_TRUE_AMOUNT', 'Просмотр стоимости тарифного плана', 0, NULL, 'MTS', DEFAULT, DEFAULT, DEFAULT, NULL, NULL, 7464)
+;
+INSERT INTO "public"."groupe" ("code", "name", "is_disabled", "ldap", "groupe_type", "is_manager", "is_special", "is_inherit", "department_name", "abbreviation", "user__id")
+VALUES ('MTS_EDIT', 'Право редактировать МТС', 0, NULL, 'MTS', DEFAULT, DEFAULT, DEFAULT, NULL, NULL, 7464);
+
+INSERT INTO "public"."groupe" ("code", "name", "is_disabled", "ldap", "groupe_type", "is_manager", "is_special", "is_inherit", "department_name", "abbreviation", "user__id")
+VALUES ('MTS_EXPORT_1S', 'Право выгрузки данных по телефонам МТС в 1С', 0, NULL, 'MTS', DEFAULT, DEFAULT, DEFAULT, NULL, NULL, 7464);
+
+INSERT INTO "public"."groupe" ("code", "name", "is_disabled", "ldap", "groupe_type", "is_manager", "is_special", "is_inherit", "department_name", "abbreviation", "user__id")
+VALUES ('MTS_RP_MOSCOW', 'Доступ к телефонам МТС - ООО Русский проект(Москва)', 0, NULL, 'MTS', DEFAULT, DEFAULT, DEFAULT, NULL, NULL, 7464)
+;
+INSERT INTO "public"."groupe" ("code", "name", "is_disabled", "ldap", "groupe_type", "is_manager", "is_special", "is_inherit", "department_name", "abbreviation", "user__id")
+VALUES ('MTS_FINVEST', 'Доступ к телефонам МТС - ООО Финвест', 0, NULL, 'MTS', DEFAULT, DEFAULT, DEFAULT, NULL, NULL, 7464 )
+;
+INSERT INTO "public"."groupe" (code, name,groupe_type,"user__id",is_disabled)
+  select ('MTS_' || krp_company) as code, ('Доступ к телефонам МТС' || name)  as name,
+    'MTS',7464,0 from krp_company where krp_company not in('FINVEST','RP_MOSCOW') and krp_company.inn notnull ;
+
+INSERT INTO "public"."groupe_tree" (parent_id, child_id,"user__id")
+	select (select groupe_id from public.groupe where code = 'MTS_ADMIN') as parent_id ,groupe_id,7464
+		from public.groupe where code ilike 'MTS%' and code not in('MTS_ADMIN','MTS_BLOCKED');
+
+-----------------------------------------MTS_OUT_1c
+create table mts_out_1c
+(
+	mts_out_1c_id  bigserial               not null
+		constraint mts_out_1c_pkey
+		primary key,
+	create_date timestamp default now() not null,
+	contract character varying(20),--Лиц.счет
+	account character varying(12),--№ счета
+	invoice_date date, --Дата счета
+	filename character varying(255),--Файл
+	employee_id character varying(24), --Ид.сотрудника
+	fms character varying(128), --Ф.И.О.
+	period date, --Месяц
+	mts_period_id integer, --Ид. периода
+	amount decimal(12,4), --Факт.Расход
+	limit_amount decimal(12,4), --Лимит
+	discount decimal(12,4),--Скидка
+	is_saved smallint, --Сохранено
+	user_id integer
+) with (oids=false);
+ALTER TABLE "mts_out_1c"
+	OWNER TO postgres;
+GRANT ALL ON TABLE "mts_out_1c" TO postgres;
+GRANT ALL ON TABLE "mts_out_1c" TO public;
+GRANT ALL ON SEQUENCE mts_out_1c_mts_out_1c_id_seq to public;
+
+COMMENT ON COLUMN mts_out_1c.mts_out_1c_id IS 'Идентификатор';
+COMMENT ON COLUMN mts_out_1c.create_date is 'Дата создания';
+COMMENT ON COLUMN mts_out_1c.contract is 'Лиц.счет';
+COMMENT ON COLUMN mts_out_1c.account is '№ счета';
+COMMENT ON COLUMN mts_out_1c.invoice_date is 'Дата счета';
+COMMENT ON COLUMN mts_out_1c.filename is 'Файл';
+COMMENT ON COLUMN mts_out_1c.employee_id is 'Ид.сотрудника';
+COMMENT ON COLUMN mts_out_1c.fms is 'Ф.И.О.';
+COMMENT ON COLUMN mts_out_1c.period is 'Месяц';
+COMMENT ON COLUMN mts_out_1c.amount is 'Факт.Расход';
+COMMENT ON COLUMN mts_out_1c.limit_amount is 'Лимит';
+COMMENT ON COLUMN mts_out_1c.discount is 'Скидка';
+COMMENT ON COLUMN mts_out_1c.is_saved is 'Сохранено';
+COMMENT ON COLUMN mts_out_1c.user_id is 'Пользователь';
+COMMENT ON table mts_out_1c is 'Выгрузка в 1С данных MTS ';
+
+
+CREATE INDEX mts_out_1c_create_date_idx on mts_out_1c (create_date);
+CREATE INDEX mts_out_1c_contract_idx on mts_out_1c (contract);
+CREATE INDEX mts_out_1c_account_idx on mts_out_1c (account);
+CREATE INDEX mts_out_1c_invoice_date_idx on mts_out_1c (invoice_date);
+CREATE INDEX mts_out_1c_filename_idx on mts_out_1c (filename);
+CREATE INDEX mts_out_1c_employee_id_idx on mts_out_1c (employee_id);
+CREATE INDEX mts_out_1c_fms_idx on mts_out_1c (fms);
+CREATE INDEX mts_out_1c_period_idx on mts_out_1c (period);
+CREATE INDEX mts_out_1c_amount_idx on mts_out_1c (amount);
+CREATE INDEX mts_out_1c_limit_amount_idx on mts_out_1c (limit_amount);
+CREATE INDEX mts_out_1c_discount_idx on mts_out_1c (discount);
+CREATE INDEX mts_out_1c_user_id_idx on mts_out_1c (user_id);
+
+
+-----------------------------------MTS_number_mts_period history
+
+create table "mts_number_mts_period_R"
+(
+	revision_id bigserial    not null
+		constraint "mts_number_mts_period_R_pkey"
+		primary key,
+	mts_number_mts_period_id bigint,
+	mts_number_id bigint not null,
+	mts_period_id bigint not null,
+	amount numeric(12,4) not null default 0,
+	mts_tariff_plan character varying(64) default NULL,
+	user_id int,
+	user__id int default 4000,
+	description text,
+	constraint "mts_number_mts_period_R > user  (createdby)" foreign key (user__id) references "user"(user_id) on update cascade,
+	constraint "mts_number_mts_period_R > user" foreign key (user_id) references "user"(user_id) on update cascade
+)with( oids=false);
+ALTER TABLE "mts_number_mts_period_R"
+	OWNER TO postgres;
+GRANT ALL ON TABLE "mts_number_mts_period_R" TO postgres;
+GRANT ALL ON TABLE "mts_number_mts_period_R" TO public;
+
+CREATE INDEX "mts_number_mts_period_R_mts_number_mts_period_id_idx" ON public."mts_number_mts_period_R" (mts_number_mts_period_id);
+CREATE INDEX "mts_number_mts_period_R_mts_number_id_idx" ON public."mts_number_mts_period_R" (mts_number_id);
+CREATE INDEX "mts_number_mts_period_R_user__id_idx" ON public."mts_number_mts_period_R" (user__id);
+CREATE INDEX "mts_number_mts_period_R_user_id_idx" ON public."mts_number_mts_period_R" (user_id);
+CREATE INDEX "mts_number_mts_period_R_mts_period_id_idx" ON public."mts_number_mts_period_R" (mts_period_id);
+CREATE INDEX "mts_number_mts_period_R_mts_tariff_plan_idx" ON public."mts_number_mts_period_R" (mts_tariff_plan);
+CREATE INDEX "mts_number_mts_period_R_amount_idx" ON public."mts_number_mts_period_R" (amount);
+
+create table "mts_number_mts_period_H"
+(
+	history_id  bigserial               not null
+		constraint "mts_number_mts_period_H_pkey"
+		primary key,
+	create_date timestamp default now() not null,
+	revision_id bigint,
+	id bigint
+) with (oids=false);
+ALTER TABLE "mts_number_mts_period_H"
+	OWNER TO postgres;
+GRANT ALL ON TABLE "mts_number_mts_period_H" TO postgres;
+GRANT ALL ON TABLE "mts_number_mts_period_H" TO public;
+
+
+comment on table "mts_number_mts_period_H" is 'История изменения номеров-периодов MTS';
+comment on column "mts_number_mts_period_H".history_id is 'Идентификатор';
+comment on column "mts_number_mts_period_H".create_date is 'Дата создания ревизии';
+comment on column "mts_number_mts_period_H".revision_id is 'Идентификатор ревизии';
+
+create index "mts_number_mts_period_H_id_idx" on "mts_number_mts_period_H" (id);
+create index "mts_number_mts_period_H_create_date_idx" on "mts_number_mts_period_H" (create_date);
+create index "mts_numbert_mts_period_H_revision_id_idx" on "mts_number_mts_period_H" (revision_id);
+
+GRANT ALL ON SEQUENCE "mts_number_mts_period_H_history_id_seq" to public;
+GRANT ALL ON SEQUENCE "mts_number_mts_period_R_revision_id_seq" to public;
+create trigger tf_mts_number_mts_period_ins_a
+	after insert
+	on mts_number_mts_period
+	for each row
+execute procedure tf_ins();
+
+create trigger tf_mts_number_mts_period_upd_a
+	after update
+	on mts_number_mts_period
+	for each row
+execute procedure tf_upd();
+create trigger tf_mts_number_mts_period_del_a
+	after delete
+	on mts_number_mts_period
+	for each row
+execute procedure tf_del();
