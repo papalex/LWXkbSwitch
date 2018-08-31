@@ -1,0 +1,84 @@
+select array_to_string(array_agg(upd), E';\n') from
+	(select 'update exchange.suz_crm_company set fms=' ||
+			coalesce('''' || replace(case when c.legal_form='LEGAL_FORM|ИП' then 'ИП ' else '' end || c.fms, '''', '''''') || '''', 'null')
+	 || ', name=' || coalesce('''' || replace(fn_company_name_for_run(c.company_id), '''', '''''') || '''', 'null')
+	 || ', uid36=' || coalesce('''' || c.uid36 || '''', 'null')
+	 || ', uid24=' || coalesce('''' || c.uid24 || '''', 'null')
+	 || ', full_name=' || coalesce('''' || replace(c.full_name, '''', '''''') || '''', 'null')
+	 || ', short_name=' || coalesce('''' || replace(c.short_name, '''', '''''') || '''', 'null')
+	 || ', legal_form=' || coalesce('''' || c.legal_form || '''', 'null')
+	 || ', tax_inspection=' || coalesce('''' || replace(c.tax_inspection, '''', '''''') || '''', 'null')
+	 || ', ogrn=' || coalesce('''' || c.ogrn || '''', 'null')
+	 || ', inn=' || coalesce('''' || c.inn || '''', 'null')
+	 || ', kpp=' || coalesce('''' || c.kpp || '''', 'null')
+	 || ', okpo=' || coalesce('''' || c.okpo || '''', 'null')
+	 || ', okved=' || coalesce('''' || co.okved || '''', 'null')
+	 || ', okato=' || coalesce('''' || c.okato || '''', 'null')
+	 || ', snils=' || coalesce('''' || c.snils || '''', 'null')
+	 || ', payment_form_type=' || coalesce('''' || c.payment_form_type || '''', 'null')
+	 || ', other_payment_form=' || coalesce('''' || replace(c.other_payment_form, '''', '''''') || '''', 'null')
+	 || ', vat=' || coalesce('''' || c.vat || '''', 'null')
+	 || ', is_add_check=' || coalesce('''' || c.is_add_check || '''', 'null')
+	 || ', user_id=' || coalesce('''' || c.user_id || '''', 'null')
+	 || ', owner=' || coalesce('''' || c.owner || '''', 'null')
+	 || ', phone=' || coalesce('''' || replace(p.phone, '''', '''''') || '''', 'null')
+	 || ', email=' || coalesce('''' || replace(e.email, '''', '''''') || '''', 'null')
+	 || ', legal_address=' || coalesce('''' || replace(la.address100, '''', '''''') || '''', 'null')
+	 || ', legal_address_kladr=' || coalesce('''' || replace(la.address, '''', '''''') || '''', 'null')
+	 || ', actual_address=' || coalesce('''' || replace(aa.address100, '''', '''''') || '''', 'null')
+	 || ', actual_address_kladr=' || coalesce('''' || replace(aa.address, '''', '''''') || '''', 'null')
+	 || ', client_id=' || coalesce(cast((select client_id from client_company
+where company_id=c.company_id
+	  and company_type='COMPANY_TYPE|LEGAL'
+						 order by client_company_id
+						limit 1) as varchar), 'null')
+	 || ', bik=' || coalesce('''' || a.bik || '''', 'null')
+	 || ', corr_account=' || coalesce('''' || a.corr_account || '''', 'null')
+	 || ', account=' || coalesce('''' || a.account || '''', 'null')
+	 || ', is_russian=' || coalesce('''' || a.is_russian || '''', 'null')
+	 || ', region=' || coalesce(cast(c.region as varchar), 'null')
+	 || ', free_form=' || coalesce('''' || replace(a.free_form, '''', '''''') || '''', 'null')
+	 || ', country=' || coalesce('''' || replace(cou.code, '''', '''''') || '''', 'null')
+	 || ', regnum=' || coalesce('''' || replace(c.ident, '''', '''''') || '''', 'null')
+	 || ', username=' || coalesce('''' || u.login || '''', 'null')
+	 || ', personal_account=' || coalesce('''' || c.personal_account || '''', coalesce('''' || a.personal_account || '''', 'null'))
+	 || ', is_supplier=' || case when (select count(*) from company_company_type where company_id=c.company_id and company_type='COMPANY_TYPE|SELLER')>0 then 'true' else 'false' end
+	 || ', is_buyer=' || case when (select count(*) from company_company_type where company_id=c.company_id and company_type='COMPANY_TYPE|CLIENT')>0 then 'true' else 'false' end
+	 || ', deleted=' || case when c.is_deleted=0 then 'false' else 'true' end
+	 || ', modify_date=''' || to_char(now(), 'YYYY-MM-DD HH24:MI:SS.US')
+	 || ''' where company_id=''' || c.company_id || '''
+						and modify_date<''' || to_char(now(), 'YYYY-MM-DD HH24:MI:SS.US') || '''' as upd
+	from company c
+	left outer join (select array_to_string(array_agg(p.number || coalesce(' ' || p.add, '')), ',') as phone, cp.company_id from company_phone cp
+		inner join phone p on p.phone_id=cp.phone_id
+	where cp.phone_type in ('PHONE_TYPE|CONTACT', 'PHONE_TYPE|COMMON')
+	group by cp.company_id) p on p.company_id=c.company_id
+	left outer join (select array_to_string(array_agg(e.email), ',') as email, ce.company_id from company_email ce
+		inner join email e on e.email_id=ce.email_id
+	where ce.email_type in ('EMAIL_TYPE|CONTACT', 'EMAIL_TYPE|COMMON')
+	group by ce.company_id) e on e.company_id=c.company_id
+	left outer join (select a.address, a.address100, ca.company_id, a.address_id, ca.company_address_id from company_address ca
+		inner join address a on a.address_id=ca.address_id
+	where ca.company_address_id in (select min(company_address_id) from company_address
+	where address_type='ADDRESS_TYPE|LEGAL'
+	group by company_id)) la on la.company_id=c.company_id
+	left outer join (select a.address, a.address100, ca.company_id, a.address_id, ca.company_address_id from company_address ca
+		inner join address a on a.address_id=ca.address_id
+	where ca.company_address_id in (select min(company_address_id) from company_address
+	where address_type='ADDRESS_TYPE|GENERAL_OFFICE'
+	group by company_id)) aa on aa.company_id=c.company_id
+	left outer join account a on a.company_id=c.company_id
+								 and a.account_id in (select min(account_id) from account
+	where account_type='ACCOUNT_TYPE|GENERAL'
+	group by company_id)
+	left outer join company_okved co on co.company_id=c.company_id
+										and co.company_okved_id in (select min(company_okved_id) from company_okved
+	group by company_id)
+	left outer join country cou on cou.country=c.country
+	--inner join company_modify cm on cm.company_id=c.company_id
+	inner join company_modify_cache cmc on cmc.company_id=c.company_id
+										   --and cmc.modify_date<cm.modify_date
+	left outer join "user" u on u.user_id=c.user_id
+												  --where (c.company_id, cm.modify_date) not in (select company_id, modify_date from company_modify_cache)
+														--and c.is_deleted=0
+												  limit 1000) as t;
