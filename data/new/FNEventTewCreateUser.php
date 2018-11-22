@@ -7,7 +7,7 @@ class FNEventTewCreateUser
 	public function run($args)
 	{
 		z("Начато создание пользователя" );
-		Yii::app()->db->CreateCommand(<<<SQL
+		$params = Yii::app()->db->CreateCommand(<<<SQL
 		select 
 			(select replace(replace(substring(trim(_varchar) from 1 for 20), '"', ''), '''', '') from task_param
 					where task_id=tid
@@ -27,32 +27,38 @@ class FNEventTewCreateUser
 			(select _int from task_param
 				where task_id=tid
 				and task_diag_param='OFFICE') as office,
-		replace(replace(substring(trim(_varchar) from 1 for 256), '"', ''), '''', '') as pf, replace(replace(substring(trim(_text) from 1 for 256), '"', ''), '''', '') as lpf
-		from task_param
-		where task_id=tid
-			  and task_diag_param='PHOTO'
-			  and is_file=1
-			  and is_readonly=1) as photo
+			replace(replace(substring(trim(ph._varchar) from 1 for 256), '"', ''), '''', '') as pf, replace(replace(substring(trim(ph._text) from 1 for 256), '"', ''), '''', '') as lpf,
+		st.task_id as tid, st.user_id as uid from subtask 
+		left join task_param ph
+		on ph.task_id=tid
+			  and ph.task_diag_param='PHOTO'
+			  and ph.is_file=1
+			  and ph.is_readonly=1
+		where subtask_id=sid) as tp;
+			  
 SQL
 		)->queryRow();
 		$bd = $bd ?? '1970-01-01';
-		$uid='?';
-		$pp='?';
-		$pmp='?';
-		$pf='?';
-		$office='?';
-		$uids = Yii::app()->db->createCommand(<<<SQL
-select user_id from "user" where fms=$fms_ and is_disabled =1 and birthday = $bd;
+		$uid=$params['uid'];;
+		$pp=$params['pp']?"'{$params['pp']}'":"null";//если '0' или '' или 0 то null иначе в кавычках;
+		$pmp=$params['pmp']?"'{$params['pmp']}'":"null";
+		$pf=$params['pf']?"'{$params['pf']}'":"null";
+		$office=$params['office']?"'{$params['office']}'":"null";
+		$fms_ =$params['fms_'];
+		if ($params['isreinc']==1)
+		{
+			$uids = Yii::app()->db->createCommand(<<<SQL
+select user_id from "user" where fms='$fms_' and is_disabled =1 and birthday = $bd;
 SQL
-		)->queryColumn();
-		Yii::app()->db->CreateCommand(<<<SQL
+			)->queryColumn();
+			Yii::app()->db->CreateCommand(<<<SQL
 update "user" set is_disabled=0, 
 		is_visible=0, 
 		is_ldap=0, 
-		user__id='$uid', 
-		private_phone=coalesce('$pp', null), 
-		private_mobile_phone=coalesce('$pmp', null), 
-		photo_filename=coalesce('$pf', null), 
+		user__id='$uid',
+		private_phone={$pp},
+		private_mobile_phone={$pmp},
+		photo_filename={$pf},
 		dismissal_date=null, 
 		pregnancy_date=null
 where user_id=$uid;
@@ -60,12 +66,65 @@ delete from user_groupe where user_id=$uid;
 insert into sendmail (email, subject, body, user_id) values 
 	('borisov@finvest.biz', 'Восстановление ранее работавшего', 'Восстановление ранее работавшего', 4000);
 SQL
-		)->query();
-	Yii::app()->admin_db->CreateCommand(<<<MySQL
+			)->query();
+			Yii::app()->admin_db->CreateCommand(<<<MySQL
 		INSERT INTO system_job (operator_id, user_id, job_type, date_apply, from_system, status, office_id) VALUES 
 	 (4000, {$uid}, 'user_restore', now(), 'suz.rp.ru', '0', {$office})
 MySQL
-	 	)->query(); //:90
+			)->query(); //:90
+		}
+		else
+		{
+			$uids=Yii::app()->db->CreateCommand(<<<SQL
+			insert into "user" (fms, is_disabled, user__id, private_phone, private_mobile_phone, birthday, photo_filename, is_visible) values (
+						'{$fms_}', 0, '$uid', {$pp} ,{$pmp} , {$bd}, {$pf}, 0) returning user_id
+SQL
+						)->queryScalar();
+		}
+		//append office
+		Yii::app()->db->CreateCommand("insert into user_groupe (user_id, groupe_id, user__id) values ($uids, {$office}, $uid)")->query();
+		
+		//create_ldap=
+		$u=User::model()->findByPk($uids);
+		$u->CreateLDAPUser();
+		$up=User_param::model()->findByPk($uids);
+		$up->krp_company=Yii::app()->db->CreateCommand("select  kcdp.krp_company from task_param tp
+			inner join krp_company_department_post kcdp on kcdp.krp_company_department_post_id=tp._int
+		where tp.task_id=tid
+			  and tp.task_diag_param='KRP_COMPANY'
+														order by tp.task_param_id desc
+														limit 1")->queryScalar() ;
+		$up->user__id=$uid;
+		$up->ta_email_inner_user_id=null;
+		$up->ta_email_inter_user_id=null;
+		$up->ta_contact_id=null;
+		$up->ta_company_id=null;
+		$up->ta_client_id=null;
+		$up->ta_project_ccc_id=null;
+		$up->ta_reminder_id=null;
+		$up->ta_task_id=null;
+		$up->ta_subtask_id=null;
+		$up->ta_document_id=null;
+		$up->ta_knowledge_id=null;
+		$up->ta_mailing_id=null;
+		$up->ta_email_list_id=null;
+		$up->ta_mail_template_id=null;
+		$up->save();
+		//:130
+		$postmail = Yii::app()->db->createCommand(<<<SQL
+	select 
+			dept_post.department_groupe_id as dgid, 
+			replace(replace(department_name, '"', ''), '''', '') as department,
+			replace(replace(post_groupe.name, '"', ''), '''', '') as post
+		from department_post dept_post
+		left join  groupe dept
+			on dept.groupe_id = dept_post.department_groupe_id
+			left join groupe as post_groupe on  post_groupe.groupe_id=dept_post.post_groupe_id
+		where department_post_id=
+				(select _int from task_param where task_id=tid and task_diag_param='DEPARTMENT_POSITION2');	
+SQL
+		)->queryRow();
+		//:139
 	}
 	public function resamplePhoto($args)
 	{
