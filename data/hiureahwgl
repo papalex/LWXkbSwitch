@@ -1572,3 +1572,62 @@ for webgl-utils, m3, m4, and webgl-lessons-ui.
 	main();
 
 </script>
+/*//v400 h250 v-30 l 100 -100    h30 v-40 h150 l -160 -230
+		gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+			0,100,
+			0,400,
+			250,400,
+
+            250,400,
+			250,370,
+			0,100,
+
+			0,100,
+			250,370,
+			350,270,
+
+			350,270,
+			380,270,
+            380,230,
+
+            380,230,
+            530,230,
+            370,100,
+
+			370,100,
+            0,100,
+			380,230,
+
+			380,230,
+			350,270,
+            0,100,
+
+//kitchen
+			0+383, 100,
+			160+383, 0,
+			160+383, 230,
+
+            330+383, 0,
+			160+383, 0,
+			330+383, 230,
+
+			330+383, 230,
+			160+383, 0,
+			160+383, 230,
+//garage
+            435+283, 800,
+			435+283, 0,
+			785+283, 800,
+
+			785+283, 800,
+			435+283, 0,
+			785+283, 0,
+
+		]), gl.STATIC_DRAW);
+		//M 0 0 l 160 230 h270 v-330 h-330
+		gl.uniform4f(colorUniformLocation, Math.random(), Math.random(), Math.random(), 1);
+		gl.drawArrays(primitiveType, offset, 21);
+		gl.uniform4f(colorUniformLocation, Math.random(), Math.random(), Math.random(), 1);
+		gl.drawArrays(primitiveType, 21, 9);
+		gl.uniform4f(colorUniformLocation, Math.random(), Math.random(), Math.random(), 1);
+		gl.drawArrays(primitiveType, 30, 6);*/
